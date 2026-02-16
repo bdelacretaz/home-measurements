@@ -6,7 +6,7 @@
 | 10:00 | Living Room | 21.3            | 55           |
 | 12:00 | Bedroom     | 22.1            | 52           |
 | 13:00 | Kitchen     | 23.7            | 49           |
-| 14:00 | Living Room | 24.2            | 47           |
+| 14:00 | Living Room | 20.2            | 47           |
 | 16:00 | Bedroom     | 23.5            | 50           |
 | 18:00 | Kitchen     | 22.0            | 54           |
 | 20:00 | Living Room | 21.4            | 57           |

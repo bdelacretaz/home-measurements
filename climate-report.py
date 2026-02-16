@@ -446,12 +446,12 @@ def page_header_footer(c: rl_canvas.Canvas, doc, styles: dict, today: str):
     y_top = PAGE_H - MARGIN_T
     c.setFillColor(BLACK)
     c.setFont("Times-Bold", 48)
-    masthead = "The Home Dispatch"
+    masthead = "All Fake Data"
     c.drawCentredString(PAGE_W / 2, y_top - 42, masthead)
 
     c.setFont("Times-Roman", 8)
     c.setFillColor(MID)
-    sub = f"ESTABLISHED 2024  ·  {today.upper()}  ·  CLIMATE MONITORING SPECIAL EDITION  ·  COMPLIMENTARY"
+    sub = f"ESTABLISHED 2024  ·  {today.upper()}  ·  INTERESTING GRAPHS  ·  ALL GENERATED"
     c.drawCentredString(PAGE_W / 2, y_top - 55, sub)
 
     # double rule under masthead
@@ -507,7 +507,7 @@ def build_pdf(df: pd.DataFrame, png_bytes: bytes, out_path: str):
     story.append(Paragraph("EXCLUSIVE INVESTIGATION", styles["kicker"]))
     story.append(ThickRule(CONTENT_W, thickness=0.5, color=colors.HexColor("#888"), spaceAfter=2))
     story.append(Paragraph(
-        "House Temperatures Surge Past 24°C in Afternoon Hours as Humidity Dips to Record Low",
+        "Here's how to generate PDFs with Python with dynamically generated diagrams",
         styles["headline"],
     ))
     story.append(Paragraph(
@@ -606,17 +606,29 @@ def build_pdf(df: pd.DataFrame, png_bytes: bytes, out_path: str):
                 styles["body"],
             ),
         ],
-        # Column 3 – data table + sidebar teaser
+        # Column 3 – sensor notes + methodology
         [
-            Paragraph("RAW READINGS AT A GLANCE", styles["kicker"]),
-            stats_table(df, styles),
-            Spacer(1, 6),
+            Paragraph("SENSORS &amp; METHODOLOGY", styles["kicker"]),
             Paragraph(
-                "All readings obtained via calibrated DHT-22 sensors. "
-                "Timestamps reflect local civil time. Data logged to a "
-                "Raspberry Pi home server and cross-checked against a "
-                "reference thermometer in each room.",
-                styles["caption"],
+                "All readings were obtained via calibrated DHT-22 sensors, "
+                "accurate to ±0.5 °C and ±2 % RH. Timestamps reflect local "
+                "civil time. Data were logged to a Raspberry Pi home server "
+                "and cross-checked against a reference thermometer placed "
+                "in each room for the duration of the survey.",
+                styles["body"],
+            ),
+            Paragraph(
+                "Sensors were mounted at seated head-height (approximately "
+                "1.2 m) away from direct sunlight, radiators, and draughts. "
+                "The Kitchen sensor was positioned above the worktop, clear "
+                "of steam sources. No readings were discarded or adjusted.",
+                styles["body"],
+            ),
+            Paragraph(
+                "Full raw data, including sensor calibration certificates "
+                "and server logs, are available on request from the Home "
+                "Automation Data Desk.",
+                styles["body"],
             ),
         ],
     ]
@@ -636,6 +648,18 @@ def build_pdf(df: pd.DataFrame, png_bytes: bytes, out_path: str):
         ("LINEBEFORE",   (1,0), (2,0),   0.5, colors.HexColor("#cccccc")),
     ]))
     story.append(col_table)
+
+    # ── 4. Centered data table (natural width, below columns) ─────────────────
+    story.append(Spacer(1, 8))
+    story.append(ThickRule(CONTENT_W, thickness=0.5, color=colors.HexColor("#bbb"), spaceAfter=6))
+    story.append(Paragraph("RAW READINGS AT A GLANCE", styles["kicker"]))
+    tbl = stats_table(df, styles)
+    tbl.hAlign = "CENTER"
+    story.append(tbl)
+    story.append(Paragraph(
+        "All 12 readings from the survey period, ordered by time of day.",
+        styles["caption"],
+    ))
 
     # ── 4. Build the PDF ──────────────────────────────────────────────────────
     doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
