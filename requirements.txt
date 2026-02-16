@@ -1,7 +1,5 @@
 # requirements.txt — dependencies for climate_report.py
 # Install with: pip install -r requirements.txt
 
-matplotlib>=3.7.0
 pandas>=2.0.0
 reportlab>=4.0.0
-Pillow>=10.0.0

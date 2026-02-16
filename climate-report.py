@@ -2,13 +2,12 @@
 climate_report.py
 ─────────────────────────────────────────────────────────────
 Reads a Markdown-formatted table of temperature / humidity
-readings, produces a vector SVG chart via matplotlib, and
-assembles a newspaper-front-page PDF using ReportLab.
+readings, produces a vector chart using ReportLab graphics,
+and assembles a newspaper-front-page PDF.
 
 Open-source libraries used
-  • matplotlib  – SVG chart generation
-  • reportlab   – PDF typesetting
-  • pandas       – Markdown-table parsing helper
+  • reportlab   – PDF typesetting and vector chart generation
+  • pandas      – Markdown-table parsing helper
 
 Usage
   python climate_report.py            # uses the built-in sample table
@@ -24,11 +23,6 @@ import textwrap
 import datetime
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")                           # headless backend
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import matplotlib.dates as mdates
 import pandas as pd
 
 from reportlab.lib.pagesizes import A4
@@ -44,7 +38,6 @@ from reportlab.graphics import renderPDF
 from reportlab.graphics.shapes import Drawing
 from reportlab.platypus.flowables import Flowable
 from reportlab.pdfgen import canvas as rl_canvas
-# svglib not available; we embed a high-DPI PNG buffer instead
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -104,22 +97,30 @@ def parse_markdown_table(md: str) -> pd.DataFrame:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# STEP 2 – Generate the SVG chart  (dual-axis, colour-coded by room)
+# STEP 2 – Generate the chart using ReportLab vector graphics (no matplotlib)
 # ──────────────────────────────────────────────────────────────────────────────
 
 ROOM_COLORS = {
     "Living Room": "#e05c2d",
-    "Salon": "#e05c2d",
     "Bedroom":     "#2d6ee0",
-    "Chambre à coucher":     "#2d6ee0",
     "Kitchen":     "#27a65c",
-    "Cuisine":     "#27a65c",
 }
 DEFAULT_COLOR = "#888888"
 
 
-def generate_chart_svg(df: pd.DataFrame) -> bytes:
-    """Return a high-DPI PNG byte-string of the dual-axis chart."""
+def generate_chart_reportlab(df: pd.DataFrame, width_pt: float) -> Drawing:
+    """
+    Return a ReportLab Drawing with a dual-axis temperature/humidity chart.
+    Pure vector graphics — no matplotlib, no raster images.
+    """
+    from reportlab.graphics.shapes import (
+        Drawing, Group, String, Line, Rect, Circle, Polygon
+    )
+    from reportlab.graphics.charts.lineplots import LinePlot
+    from reportlab.graphics.charts.barcharts import VerticalBarChart
+    from reportlab.graphics.charts.axes import XValueAxis, YValueAxis
+    from reportlab.graphics.widgets.grids import Grid
+    from reportlab.lib import colors as rl_colors
 
     # Identify columns by keywords
     time_col  = next((c for c in df.columns if "time"  in c.lower()), df.columns[0])
@@ -130,7 +131,7 @@ def generate_chart_svg(df: pd.DataFrame) -> bytes:
     if temp_col is None or hum_col is None:
         raise ValueError("Cannot detect Temperature and Humidity columns.")
 
-    # Convert time strings like "06:00" to numeric hours for axis
+    # Convert time strings like "06:00" to numeric hours
     def parse_time(t):
         t = str(t).strip()
         if ":" in t:
@@ -146,114 +147,199 @@ def generate_chart_svg(df: pd.DataFrame) -> bytes:
     df["_temp"] = pd.to_numeric(df[temp_col], errors="coerce")
     df["_hum"]  = pd.to_numeric(df[hum_col],  errors="coerce")
     df["_loc"]  = df[loc_col].astype(str) if loc_col else "–"
-
-    # ── figure layout ────────────────────────────────────────────────────────
-    fig, ax1 = plt.subplots(figsize=(10, 4.6), dpi=150)
-    ax2 = ax1.twinx()
-
-    fig.patch.set_facecolor("#fafaf8")
-    ax1.set_facecolor("#fafaf8")
-
-    # ── background shading ───────────────────────────────────────────────────
-    ax1.axvspan(0, 7,  alpha=0.06, color="#4488cc", zorder=0)
-    ax1.axvspan(22, 24, alpha=0.06, color="#4488cc", zorder=0)
-
-    # ── comfort-zone band ────────────────────────────────────────────────────
-    ax1.axhspan(19, 23, alpha=0.08, color="#e05c2d", zorder=0, label="_comfort")
-    ax1.text(23.3, 21, "Comfort\nzone", fontsize=6.5, color="#c04810",
-             va="center", ha="left", style="italic")
-
-    # ── humidity band ────────────────────────────────────────────────────────
-    ax2.axhspan(40, 60, alpha=0.07, color="#2d6ee0", zorder=0)
-
-    # Sort by time
     df.sort_values("_hour", inplace=True)
 
-    # ── temperature line ─────────────────────────────────────────────────────
-    ax1.plot(df["_hour"], df["_temp"],
-             color="#888", linewidth=1.4, linestyle="--",
-             zorder=2, alpha=0.5)
+    # ── dimensions ────────────────────────────────────────────────────────────
+    height_pt = width_pt * 0.46
+    margin_l = 45
+    margin_r = 45
+    margin_t = 50
+    margin_b = 35
+    
+    plot_w = width_pt - margin_l - margin_r
+    plot_h = height_pt - margin_t - margin_b
+    plot_x = margin_l
+    plot_y = margin_b
 
-    # ── per-location scatter markers ─────────────────────────────────────────
-    for loc in df["_loc"].unique():
-        sub = df[df["_loc"] == loc]
-        c = ROOM_COLORS.get(loc, DEFAULT_COLOR)
-        ax1.scatter(sub["_hour"], sub["_temp"],
-                    color=c, s=90, zorder=5, edgecolors="white",
-                    linewidths=0.8, label=loc)
+    drawing = Drawing(width_pt, height_pt)
+    
+    # ── background ────────────────────────────────────────────────────────────
+    drawing.add(Rect(0, 0, width_pt, height_pt, 
+                     fillColor=rl_colors.HexColor("#fafaf8"), strokeColor=None))
 
-    # ── humidity bars ────────────────────────────────────────────────────────
-    bar_colors = [ROOM_COLORS.get(r, DEFAULT_COLOR) for r in df["_loc"]]
-    bars = ax2.bar(df["_hour"], df["_hum"],
-                   width=0.55, color=bar_colors, alpha=0.22,
-                   zorder=1, edgecolor="none")
+    # ── helper functions ──────────────────────────────────────────────────────
+    def x_scale(hour):
+        """Convert hour (0-24) to drawing x-coordinate."""
+        return plot_x + (hour / 24.0) * plot_w
+    
+    def y_temp_scale(temp):
+        """Convert temperature (14-28°C) to drawing y-coordinate."""
+        return plot_y + ((temp - 14) / (28 - 14)) * plot_h
+    
+    def y_hum_scale(hum):
+        """Convert humidity (35-80%) to drawing y-coordinate."""
+        return plot_y + ((hum - 35) / (80 - 35)) * plot_h
 
-    # ── value annotations ────────────────────────────────────────────────────
+    # ── shaded regions (overnight, comfort zone, humidity band) ───────────────
+    # Overnight (0-7 and 22-24)
+    drawing.add(Rect(x_scale(0), plot_y, x_scale(7) - x_scale(0), plot_h,
+                     fillColor=rl_colors.HexColor("#4488cc"), fillOpacity=0.06,
+                     strokeColor=None))
+    drawing.add(Rect(x_scale(22), plot_y, x_scale(24) - x_scale(22), plot_h,
+                     fillColor=rl_colors.HexColor("#4488cc"), fillOpacity=0.06,
+                     strokeColor=None))
+    
+    # Comfort zone (19-23°C)
+    comfort_y1 = y_temp_scale(19)
+    comfort_y2 = y_temp_scale(23)
+    drawing.add(Rect(plot_x, comfort_y1, plot_w, comfort_y2 - comfort_y1,
+                     fillColor=rl_colors.HexColor("#e05c2d"), fillOpacity=0.08,
+                     strokeColor=None))
+    drawing.add(String(x_scale(23.5), y_temp_scale(21), "Comfort",
+                      fontSize=6.5, fillColor=rl_colors.HexColor("#c04810"),
+                      textAnchor="start", fontName="Helvetica-Oblique"))
+    drawing.add(String(x_scale(23.5), y_temp_scale(21) - 8, "zone",
+                      fontSize=6.5, fillColor=rl_colors.HexColor("#c04810"),
+                      textAnchor="start", fontName="Helvetica-Oblique"))
+
+    # Humidity band (40-60%)
+    hum_y1 = y_hum_scale(40)
+    hum_y2 = y_hum_scale(60)
+    drawing.add(Rect(plot_x, hum_y1, plot_w, hum_y2 - hum_y1,
+                     fillColor=rl_colors.HexColor("#2d6ee0"), fillOpacity=0.07,
+                     strokeColor=None))
+
+    # ── grid lines (horizontal only, for temperature) ────────────────────────
+    for temp in [16, 18, 20, 22, 24, 26]:
+        y = y_temp_scale(temp)
+        drawing.add(Line(plot_x, y, plot_x + plot_w, y,
+                        strokeColor=rl_colors.HexColor("#ddd"),
+                        strokeWidth=0.6, strokeDashArray=[2, 2]))
+
+    # ── humidity bars ─────────────────────────────────────────────────────────
+    bar_width = plot_w / 24 * 0.55
     for _, row in df.iterrows():
-        ax1.annotate(
-            f"{row['_temp']:.1f}°",
-            (row["_hour"], row["_temp"]),
-            textcoords="offset points", xytext=(0, 9),
-            fontsize=6.5, ha="center", color="#333",
-            fontweight="bold",
-        )
+        x_center = x_scale(row["_hour"])
+        bar_h = y_hum_scale(row["_hum"]) - plot_y
+        col = ROOM_COLORS.get(row["_loc"], DEFAULT_COLOR)
+        drawing.add(Rect(x_center - bar_width/2, plot_y, bar_width, bar_h,
+                        fillColor=rl_colors.HexColor(col), fillOpacity=0.22,
+                        strokeColor=None))
 
-    # ── axes styling ─────────────────────────────────────────────────────────
-    hours = [0, 3, 6, 9, 12, 15, 18, 21, 24]
-    labels = ["Midnight","3 AM","6 AM","9 AM","Noon","3 PM","6 PM","9 PM","Midnight"]
-    ax1.set_xticks(hours)
-    ax1.set_xticklabels(labels, fontsize=7.5, color="#444")
-    ax1.set_xlim(0, 24)
-    ax1.set_ylim(14, 28)
-    ax2.set_ylim(35, 80)
+    # ── temperature line (dashed) ─────────────────────────────────────────────
+    temp_points = [(x_scale(row["_hour"]), y_temp_scale(row["_temp"]))
+                   for _, row in df.iterrows()]
+    for i in range(len(temp_points) - 1):
+        x1, y1 = temp_points[i]
+        x2, y2 = temp_points[i + 1]
+        drawing.add(Line(x1, y1, x2, y2,
+                        strokeColor=rl_colors.HexColor("#888888"),
+                        strokeWidth=1.4, strokeDashArray=[4, 3]))
 
-    ax1.set_ylabel("Temperature (°C)", fontsize=8.5, color="#c04810", labelpad=8)
-    ax2.set_ylabel("Humidity (%)", fontsize=8.5, color="#2d5fb0", labelpad=8)
+    # ── temperature markers (colored by room) ─────────────────────────────────
+    for _, row in df.iterrows():
+        x = x_scale(row["_hour"])
+        y = y_temp_scale(row["_temp"])
+        col = ROOM_COLORS.get(row["_loc"], DEFAULT_COLOR)
+        
+        # White outline
+        drawing.add(Circle(x, y, 5.5, fillColor=rl_colors.white,
+                          strokeColor=None))
+        # Colored fill
+        drawing.add(Circle(x, y, 5, fillColor=rl_colors.HexColor(col),
+                          strokeColor=rl_colors.white, strokeWidth=0.8))
+        
+        # Value annotation
+        drawing.add(String(x, y + 11, f"{row['_temp']:.1f}°",
+                          fontSize=6.5, fillColor=rl_colors.HexColor("#333"),
+                          textAnchor="middle", fontName="Helvetica-Bold"))
 
-    ax1.tick_params(axis="y", labelcolor="#c04810", labelsize=8)
-    ax2.tick_params(axis="y", labelcolor="#2d5fb0", labelsize=8)
+    # ── axes ──────────────────────────────────────────────────────────────────
+    # Bottom axis (time)
+    drawing.add(Line(plot_x, plot_y, plot_x + plot_w, plot_y,
+                    strokeColor=rl_colors.HexColor("#cccccc"), strokeWidth=0.6))
+    
+    time_labels = [
+        (0, "Midnight"), (3, "3 AM"), (6, "6 AM"), (9, "9 AM"),
+        (12, "Noon"), (15, "3 PM"), (18, "6 PM"), (21, "9 PM"), (24, "Midnight")
+    ]
+    for hour, label in time_labels:
+        x = x_scale(hour)
+        drawing.add(Line(x, plot_y, x, plot_y - 3,
+                        strokeColor=rl_colors.HexColor("#999"), strokeWidth=0.6))
+        drawing.add(String(x, plot_y - 12, label,
+                          fontSize=7.5, fillColor=rl_colors.HexColor("#444"),
+                          textAnchor="middle", fontName="Helvetica"))
 
-    ax1.yaxis.label.set_color("#c04810")
-    ax2.yaxis.label.set_color("#2d5fb0")
+    # Left axis (temperature in °C)
+    drawing.add(Line(plot_x, plot_y, plot_x, plot_y + plot_h,
+                    strokeColor=rl_colors.HexColor("#c04810"), strokeWidth=1))
+    for temp in [14, 16, 18, 20, 22, 24, 26, 28]:
+        y = y_temp_scale(temp)
+        drawing.add(Line(plot_x - 3, y, plot_x, y,
+                        strokeColor=rl_colors.HexColor("#c04810"), strokeWidth=0.6))
+        drawing.add(String(plot_x - 8, y - 3, str(temp),
+                          fontSize=8, fillColor=rl_colors.HexColor("#c04810"),
+                          textAnchor="end", fontName="Helvetica"))
+    
+    drawing.add(String(plot_x - 8, plot_y + plot_h + 18, "Temperature (°C)",
+                      fontSize=8.5, fillColor=rl_colors.HexColor("#c04810"),
+                      textAnchor="end", fontName="Helvetica-Bold"))
 
-    for spine in ["top"]:
-        ax1.spines[spine].set_visible(False)
-        ax2.spines[spine].set_visible(False)
-    ax1.spines["left"].set_color("#c04810")
-    ax2.spines["right"].set_color("#2d5fb0")
-    ax1.spines["bottom"].set_color("#ccc")
+    # Right axis (humidity %)
+    drawing.add(Line(plot_x + plot_w, plot_y, plot_x + plot_w, plot_y + plot_h,
+                    strokeColor=rl_colors.HexColor("#2d5fb0"), strokeWidth=1))
+    for hum in [40, 50, 60, 70, 80]:
+        y = y_hum_scale(hum)
+        drawing.add(Line(plot_x + plot_w, y, plot_x + plot_w + 3, y,
+                        strokeColor=rl_colors.HexColor("#2d5fb0"), strokeWidth=0.6))
+        drawing.add(String(plot_x + plot_w + 8, y - 3, f"{hum}%",
+                          fontSize=8, fillColor=rl_colors.HexColor("#2d5fb0"),
+                          textAnchor="start", fontName="Helvetica"))
+    
+    drawing.add(String(plot_x + plot_w + 8, plot_y + plot_h + 18, "Humidity (%)",
+                      fontSize=8.5, fillColor=rl_colors.HexColor("#2d5fb0"),
+                      textAnchor="start", fontName="Helvetica-Bold"))
 
-    ax1.grid(axis="y", linestyle=":", linewidth=0.6, color="#ddd", alpha=0.8)
-    ax1.set_axisbelow(True)
+    # ── title ─────────────────────────────────────────────────────────────────
+    drawing.add(String(plot_x, height_pt - 15,
+                      "Indoor Climate — 24-hour Reading  ·  Temperature & Relative Humidity by Room",
+                      fontSize=9, fillColor=rl_colors.HexColor("#222"),
+                      textAnchor="start", fontName="Helvetica-Bold"))
 
-    # ── legend ───────────────────────────────────────────────────────────────
-    loc_handles, loc_labels = ax1.get_legend_handles_labels()
-    temp_line = mpatches.Patch(color="#e05c2d", alpha=0.5, label="Temperature (°C)")
-    hum_bar   = mpatches.Patch(color="#2d6ee0", alpha=0.35, label="Humidity (%)")
-    leg = ax1.legend(
-        loc_handles + [hum_bar],
-        loc_labels + ["Humidity (%)"],
-        fontsize=7.5, frameon=True, framealpha=0.9,
-        edgecolor="#ddd", loc="upper right",
-        bbox_to_anchor=(1.0, 1.0),
-        handletextpad=0.5, borderpad=0.6,
-    )
+    # ── legend ────────────────────────────────────────────────────────────────
+    legend_x = plot_x + plot_w - 10
+    legend_y = height_pt - 45
+    legend_items = [
+        ("Living Room", ROOM_COLORS["Living Room"]),
+        ("Bedroom", ROOM_COLORS["Bedroom"]),
+        ("Kitchen", ROOM_COLORS["Kitchen"]),
+        ("Humidity (%)", "#2d6ee0"),
+    ]
+    
+    # Legend background
+    drawing.add(Rect(legend_x - 85, legend_y - 35, 95, 45,
+                    fillColor=rl_colors.white, fillOpacity=0.9,
+                    strokeColor=rl_colors.HexColor("#ddd"), strokeWidth=0.6))
+    
+    for i, (label, color) in enumerate(legend_items):
+        y_offset = legend_y - i * 11
+        if label == "Humidity (%)":
+            # Bar icon for humidity
+            drawing.add(Rect(legend_x - 78, y_offset - 3, 12, 6,
+                           fillColor=rl_colors.HexColor(color), fillOpacity=0.35,
+                           strokeColor=None))
+        else:
+            # Circle icon for rooms
+            drawing.add(Circle(legend_x - 72, y_offset, 4,
+                             fillColor=rl_colors.HexColor(color),
+                             strokeColor=rl_colors.white, strokeWidth=0.6))
+        
+        drawing.add(String(legend_x - 62, y_offset - 3, label,
+                          fontSize=7.5, fillColor=rl_colors.HexColor("#333"),
+                          textAnchor="start", fontName="Helvetica"))
 
-    # ── title ────────────────────────────────────────────────────────────────
-    ax1.set_title(
-        "Indoor Climate — 24-hour Reading  ·  Temperature & Relative Humidity by Room",
-        fontsize=9, loc="left", pad=10, color="#222",
-        fontweight="bold",
-    )
-
-    plt.tight_layout(pad=1.2)
-
-    # ── save as high-DPI PNG in memory ───────────────────────────────────────
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", dpi=220)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.read()
+    return drawing
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -296,7 +382,7 @@ def build_styles() -> dict:
         "kicker": ps("kicker",
             fontName="Helvetica-Bold", fontSize=7.5, leading=9,
             textColor=RED, spaceBefore=6, spaceAfter=1,
-            fontStyle="normal", alignment=TA_CENTER),
+            fontStyle="normal"),
 
         "headline": ps("headline",
             fontName="Times-Bold", fontSize=22, leading=25,
@@ -376,18 +462,6 @@ class ThickRule(Flowable):
         return (self.rule_width, self.height)
 
 
-def chart_image(png_bytes: bytes, width_pt: float) -> RLImage:
-    """Wrap PNG bytes as a ReportLab Image at the given display width."""
-    buf = io.BytesIO(png_bytes)
-    # Let ReportLab read the image dimensions, then scale to width_pt
-    from PIL import Image as PILImage
-    im = PILImage.open(buf)
-    w_px, h_px = im.size
-    aspect = h_px / w_px
-    buf.seek(0)
-    return RLImage(buf, width=width_pt, height=width_pt * aspect)
-
-
 def stats_table(df: pd.DataFrame, styles: dict) -> Table:
     """Build a compact summary table for the PDF."""
     temp_col = next((c for c in df.columns if "temp"  in c.lower()), None)
@@ -449,12 +523,12 @@ def page_header_footer(c: rl_canvas.Canvas, doc, styles: dict, today: str):
     y_top = PAGE_H - MARGIN_T
     c.setFillColor(BLACK)
     c.setFont("Times-Bold", 48)
-    masthead = "PDF with Markdown data"
+    masthead = "PDF with graphs"
     c.drawCentredString(PAGE_W / 2, y_top - 42, masthead)
 
     c.setFont("Times-Roman", 8)
     c.setFillColor(MID)
-    sub = f"ESTABLISHED 2024  ·  {today.upper()}  ·  INTERESTING GRAPHS  ·  ALL GENERATED"
+    sub = f"ESTABLISHED 2024  ·  {today.upper()}  ·  CLIMATE MONITORING SPECIAL EDITION  ·  COMPLIMENTARY"
     c.drawCentredString(PAGE_W / 2, y_top - 55, sub)
 
     # double rule under masthead
@@ -477,7 +551,8 @@ def page_header_footer(c: rl_canvas.Canvas, doc, styles: dict, today: str):
 
     c.restoreState()
 
-def build_pdf(df: pd.DataFrame, png_bytes: bytes, out_path: str):
+
+def build_pdf(df: pd.DataFrame, chart_drawing: Drawing, out_path: str):
     """Assemble the full newspaper-style PDF."""
 
     styles = build_styles()
@@ -509,24 +584,20 @@ def build_pdf(df: pd.DataFrame, png_bytes: bytes, out_path: str):
     story.append(Paragraph("EXCLUSIVE INVESTIGATION", styles["kicker"]))
     story.append(ThickRule(CONTENT_W, thickness=0.5, color=colors.HexColor("#888"), spaceAfter=2))
     story.append(Paragraph(
-        "Here's how to generate PDFs in Python with dynamically generated diagrams",
+        "This example shows how to generate PDF documents including graphs created from Markdown data.",
         styles["headline"],
     ))
     story.append(Paragraph(
-        "This example reads a Markdown-formatted data table and generates a PDF document "
-        "including charts generated from that data.",
+        "Comprehensive 12-reading survey of Living Room, Bedroom and Kitchen reveals "
+        "dramatic intraday swings — morning chill gives way to peak afternoon warmth, "
+        "raising questions about home ventilation strategies.",
         styles["deck"],
     ))
     story.append(Paragraph("BY THE HOME DISPATCH DATA DESK  ·  CLIMATE CORRESPONDENT", styles["byline"]))
     story.append(ThickRule(CONTENT_W, thickness=2.0, color=BLACK, spaceAfter=6))
 
-    # ── 2. Full-width chart ───────────────────────────────────────────────────
-    chart_w = CONTENT_W
-    try:
-        img = chart_image(png_bytes, chart_w)   # png_bytes holds high-DPI PNG data
-        story.append(img)
-    except Exception as e:
-        story.append(Paragraph(f"[Chart could not be rendered: {e}]", styles["body"]))
+    # ── 2. Full-width chart (pure ReportLab vector graphics) ─────────────────
+    story.append(chart_drawing)
 
     story.append(Paragraph(
         "FIGURE 1 — Hourly temperature readings (coloured markers) against humidity bars "
@@ -653,8 +724,11 @@ def build_pdf(df: pd.DataFrame, png_bytes: bytes, out_path: str):
     # ── 4. Centered data table (natural width, below columns) ─────────────────
     story.append(Spacer(1, 8))
     story.append(ThickRule(CONTENT_W, thickness=0.5, color=colors.HexColor("#bbb"), spaceAfter=6))
+    
+    # Wrap kicker + table + caption in KeepTogether to prevent page splits
     tbl = stats_table(df, styles)
     tbl.hAlign = "CENTER"
+    
     table_block = KeepTogether([
         Paragraph("RAW READINGS AT A GLANCE", styles["kicker"]),
         tbl,
@@ -687,12 +761,16 @@ def main():
     print(df.to_string(index=False))
     print()
 
-    print("Generating high-DPI chart (PNG) …")
-    png_bytes = generate_chart_svg(df)
-
     out_path = "output.pdf"
+    
+    # Calculate width needed for the chart
+    CONTENT_W = A4[0] - 2 * 18 * mm
+    
+    print("Generating vector chart (ReportLab) …")
+    chart_drawing = generate_chart_reportlab(df, CONTENT_W)
+
     print(f"Composing newspaper-style PDF → {out_path} …")
-    build_pdf(df, png_bytes, out_path)
+    build_pdf(df, chart_drawing, out_path)
 
 
 if __name__ == "__main__":
