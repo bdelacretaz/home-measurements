@@ -296,7 +296,7 @@ def build_styles() -> dict:
         "kicker": ps("kicker",
             fontName="Helvetica-Bold", fontSize=7.5, leading=9,
             textColor=RED, spaceBefore=6, spaceAfter=1,
-            fontStyle="normal"),
+            fontStyle="normal", alignment=TA_CENTER),
 
         "headline": ps("headline",
             fontName="Times-Bold", fontSize=22, leading=25,
@@ -653,14 +653,17 @@ def build_pdf(df: pd.DataFrame, png_bytes: bytes, out_path: str):
     # ── 4. Centered data table (natural width, below columns) ─────────────────
     story.append(Spacer(1, 8))
     story.append(ThickRule(CONTENT_W, thickness=0.5, color=colors.HexColor("#bbb"), spaceAfter=6))
-    story.append(Paragraph("RAW READINGS AT A GLANCE", styles["kicker"]))
     tbl = stats_table(df, styles)
     tbl.hAlign = "CENTER"
-    story.append(tbl)
-    story.append(Paragraph(
-        "All 12 readings from the survey period, ordered by time of day.",
-        styles["caption"],
-    ))
+    table_block = KeepTogether([
+        Paragraph("RAW READINGS AT A GLANCE", styles["kicker"]),
+        tbl,
+        Paragraph(
+            "All 12 readings from the survey period, ordered by time of day.",
+            styles["caption"],
+        ),
+    ])
+    story.append(table_block)
 
     # ── 5. Build the PDF ──────────────────────────────────────────────────────
     doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
