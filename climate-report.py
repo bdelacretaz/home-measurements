@@ -109,8 +109,11 @@ def parse_markdown_table(md: str) -> pd.DataFrame:
 
 ROOM_COLORS = {
     "Living Room": "#e05c2d",
+    "Salon": "#e05c2d",
     "Bedroom":     "#2d6ee0",
+    "Chambre à coucher":     "#2d6ee0",
     "Kitchen":     "#27a65c",
+    "Cuisine":     "#27a65c",
 }
 DEFAULT_COLOR = "#888888"
 
@@ -446,7 +449,7 @@ def page_header_footer(c: rl_canvas.Canvas, doc, styles: dict, today: str):
     y_top = PAGE_H - MARGIN_T
     c.setFillColor(BLACK)
     c.setFont("Times-Bold", 48)
-    masthead = "All Fake Data"
+    masthead = "PDF with Markdown data"
     c.drawCentredString(PAGE_W / 2, y_top - 42, masthead)
 
     c.setFont("Times-Roman", 8)
@@ -473,7 +476,6 @@ def page_header_footer(c: rl_canvas.Canvas, doc, styles: dict, today: str):
                       f"Printed {today}  ·  Page {doc.page}")
 
     c.restoreState()
-
 
 def build_pdf(df: pd.DataFrame, png_bytes: bytes, out_path: str):
     """Assemble the full newspaper-style PDF."""
@@ -507,13 +509,12 @@ def build_pdf(df: pd.DataFrame, png_bytes: bytes, out_path: str):
     story.append(Paragraph("EXCLUSIVE INVESTIGATION", styles["kicker"]))
     story.append(ThickRule(CONTENT_W, thickness=0.5, color=colors.HexColor("#888"), spaceAfter=2))
     story.append(Paragraph(
-        "Here's how to generate PDFs with Python with dynamically generated diagrams",
+        "Here's how to generate PDFs in Python with dynamically generated diagrams",
         styles["headline"],
     ))
     story.append(Paragraph(
-        "Comprehensive 12-reading survey of Living Room, Bedroom and Kitchen reveals "
-        "dramatic intraday swings — morning chill gives way to peak afternoon warmth, "
-        "raising questions about home ventilation strategies.",
+        "This example reads a Markdown-formatted data table and generates a PDF document "
+        "including charts generated from that data.",
         styles["deck"],
     ))
     story.append(Paragraph("BY THE HOME DISPATCH DATA DESK  ·  CLIMATE CORRESPONDENT", styles["byline"]))
@@ -661,7 +662,7 @@ def build_pdf(df: pd.DataFrame, png_bytes: bytes, out_path: str):
         styles["caption"],
     ))
 
-    # ── 4. Build the PDF ──────────────────────────────────────────────────────
+    # ── 5. Build the PDF ──────────────────────────────────────────────────────
     doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
     print(f"✓ PDF written to {out_path}")
 
